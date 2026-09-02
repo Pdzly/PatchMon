@@ -629,6 +629,7 @@ type Setting struct {
 	OidcReadonlyGroup               *string          `json:"oidc_readonly_group"`
 	OidcUserGroup                   *string          `json:"oidc_user_group"`
 	OidcEnforceHttps                bool             `json:"oidc_enforce_https"`
+	OidcTrustUnverifiedEmail        bool             `json:"oidc_trust_unverified_email"`
 	MaxLoginAttempts                *int32           `json:"max_login_attempts"`
 	LockoutDurationMinutes          *int32           `json:"lockout_duration_minutes"`
 	SessionInactivityTimeoutMinutes *int32           `json:"session_inactivity_timeout_minutes"`
@@ -643,6 +644,8 @@ type Setting struct {
 	EnableHsts                      *bool            `json:"enable_hsts"`
 	JsonBodyLimit                   *string          `json:"json_body_limit"`
 	AgentUpdateBodyLimit            *string          `json:"agent_update_body_limit"`
+	ComplianceBodyLimit             *string          `json:"compliance_body_limit"`
+	AgentPingBodyLimit              *string          `json:"agent_ping_body_limit"`
 	DbTransactionLongTimeout        *int32           `json:"db_transaction_long_timeout"`
 	CorsOrigin                      *string          `json:"cors_origin"`
 	EnableLogging                   *bool            `json:"enable_logging"`

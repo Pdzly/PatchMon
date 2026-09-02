@@ -27,6 +27,7 @@ const DiscordSettings = () => {
 		discord_allow_registration: false,
 		discord_required_guild_id: "",
 	});
+	const [isDirty, setIsDirty] = useState(false);
 
 	// Fetch Discord settings
 	const { data: settings, isLoading: settingsLoading } = useQuery({
@@ -34,9 +35,10 @@ const DiscordSettings = () => {
 		queryFn: () => discordAPI.getSettings().then((res) => res.data),
 	});
 
-	// Sync form from server when settings load
+	// Sync form from server, but never over unsaved edits: a refetch would
+	// otherwise discard whatever the user had typed.
 	useEffect(() => {
-		if (!settings) return;
+		if (!settings || isDirty) return;
 		setForm({
 			discord_client_id: settings.discord_client_id || "",
 			discord_redirect_uri: settings.discord_redirect_uri || "",
@@ -44,7 +46,7 @@ const DiscordSettings = () => {
 			discord_allow_registration: settings.discord_allow_registration || false,
 			discord_required_guild_id: settings.discord_required_guild_id || "",
 		});
-	}, [settings]);
+	}, [settings, isDirty]);
 
 	// Update settings mutation
 	const updateMutation = useMutation({
@@ -52,6 +54,7 @@ const DiscordSettings = () => {
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["discordSettings"] });
 			setSecretInput("");
+			setIsDirty(false);
 		},
 	});
 
@@ -62,6 +65,7 @@ const DiscordSettings = () => {
 	};
 
 	const handleFieldChange = (field, value) => {
+		setIsDirty(true);
 		setForm((prev) => ({ ...prev, [field]: value }));
 	};
 

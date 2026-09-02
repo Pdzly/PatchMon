@@ -44,6 +44,7 @@ import InlineEdit from "../components/InlineEdit";
 import InlineMultiGroupEdit from "../components/InlineMultiGroupEdit";
 import InlineToggle from "../components/InlineToggle";
 import Tooltip from "../components/ui/Tooltip";
+import { usePageRefresh } from "../hooks/usePageRefresh";
 import { useTick } from "../hooks/useTick";
 import {
 	adminHostsAPI,
@@ -57,6 +58,17 @@ import {
 } from "../utils/api";
 import { deriveReportingState } from "../utils/hostStatus";
 import { getOSDisplayName, OSIcon } from "../utils/osIcons.jsx";
+import { invalidateHostScope } from "../utils/queryScopes";
+
+// Everything the page renders, not just the table: the stat cards, the filter
+// dropdowns and the connection badge each have their own query.
+const HOSTS_REFRESH_KEYS = [
+	["hosts"],
+	["hostCounts"],
+	["hostFilterOptions"],
+	["hostGroups"],
+	["wsStatusSummary"],
+];
 
 const HOSTS_PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500];
 const HOSTS_DEFAULT_PAGE_SIZE = 50;
@@ -222,6 +234,10 @@ const Hosts = () => {
 				case "upToDate":
 					setShowFilters(true);
 					setStatusFilter("reporting");
+					break;
+				case "awaitingData":
+					setShowFilters(true);
+					setStatusFilter("all");
 					break;
 				default:
 					break;
@@ -469,15 +485,18 @@ const Hosts = () => {
 		isLoading,
 		error,
 		refetch,
-		isFetching,
 	} = useQuery({
 		queryKey: ["hosts", hostsQueryParams],
 		queryFn: () =>
 			dashboardAPI.getHosts(hostsQueryParams).then((res) => res.data),
 		placeholderData: keepPreviousData,
-		staleTime: 5 * 60 * 1000, // Data stays fresh for 5 minutes
-		refetchOnWindowFocus: false, // Don't refetch when window regains focus
 	});
+
+	// The stat cards and the filter dropdowns come from their own queries, so a
+	// button bound only to the table left them showing counts that disagreed
+	// with the rows underneath.
+	const { refresh: refreshHosts, isRefreshing } =
+		usePageRefresh(HOSTS_REFRESH_KEYS);
 
 	const hostsPage = useMemo(() => {
 		if (Array.isArray(hostsResponse)) {
@@ -562,14 +581,11 @@ const Hosts = () => {
 		queryKey: ["hostFilterOptions"],
 		queryFn: () => dashboardAPI.getHostFilterOptions().then((res) => res.data),
 		staleTime: 5 * 60 * 1000,
-		refetchOnWindowFocus: false,
 	});
 
 	const { data: hostCounts } = useQuery({
 		queryKey: ["hostCounts"],
 		queryFn: () => dashboardAPI.getHostCounts().then((res) => res.data),
-		staleTime: 5 * 60 * 1000,
-		refetchOnWindowFocus: false,
 	});
 
 	const { data: wsStatusSummary } = useQuery({
@@ -577,7 +593,6 @@ const Hosts = () => {
 		queryFn: () => dashboardAPI.getWsStatusSummary().then((res) => res.data),
 		refetchInterval: 10000,
 		staleTime: 10000,
-		refetchOnWindowFocus: false,
 	});
 
 	// host_down alert config drives the WS pill amber→red threshold (seconds).
@@ -776,7 +791,7 @@ const Hosts = () => {
 	const bulkDeleteMutation = useMutation({
 		mutationFn: (hostIds) => adminHostsAPI.deleteBulk(hostIds),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["hosts"] });
+			invalidateHostScope(queryClient);
 			setSelectedHosts([]);
 			setShowBulkDeleteModal(false);
 		},
@@ -899,7 +914,13 @@ const Hosts = () => {
 					(host.updatesCount && host.updatesCount > 0)) &&
 				(filter !== "inactive" ||
 					(host.effectiveStatus || host.status) === "inactive") &&
-				(filter !== "upToDate" || (!host.isStale && host.updatesCount === 0)) &&
+				// "Up to date" requires package data: a host we have never received
+				// packages from is unknown, not healthy. Mirrors the server predicate.
+				(filter !== "upToDate" ||
+					(!host.isStale &&
+						host.totalPackagesCount > 0 &&
+						host.updatesCount === 0)) &&
+				(filter !== "awaitingData" || !host.totalPackagesCount) &&
 				(filter !== "stale" || host.isStale) &&
 				(filter !== "selected" ||
 					(selectedIds &&
@@ -1558,7 +1579,13 @@ const Hosts = () => {
 				let badgeClass;
 				let label;
 				let tooltipText;
-				if (reportingState === "reporting") {
+				if (reportingState === "awaiting") {
+					badgeClass =
+						"badge bg-secondary-100 text-secondary-700 dark:bg-secondary-700 dark:text-secondary-200";
+					label = "Awaiting report";
+					tooltipText =
+						"This host has been added but its agent has not sent a report yet. Install and start the agent on the host to begin monitoring.";
+				} else if (reportingState === "reporting") {
 					badgeClass =
 						"badge bg-success-100 text-success-800 dark:bg-success-900 dark:text-success-200";
 					label = "Reporting";
@@ -1762,7 +1789,7 @@ const Hosts = () => {
 	}
 
 	return (
-		<div className="min-h-0 flex flex-col md:h-[calc(100vh-7rem)] md:overflow-hidden">
+		<div className="min-h-0 flex flex-col md:h-[calc(100vh-var(--app-main-inset))] md:overflow-hidden">
 			{/* Page Header */}
 			<div className="flex items-center justify-between mb-6">
 				<div>
@@ -1776,13 +1803,13 @@ const Hosts = () => {
 				<div className="flex items-center gap-3">
 					<button
 						type="button"
-						onClick={() => refetch()}
-						disabled={isFetching}
+						onClick={() => refreshHosts()}
+						disabled={isRefreshing}
 						className="btn-outline flex items-center justify-center p-2"
 						title="Refresh hosts data"
 					>
 						<RefreshCw
-							className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
+							className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}
 						/>
 					</button>
 					<button
@@ -2075,6 +2102,7 @@ const Hosts = () => {
 											<option value="reporting">Reporting</option>
 											<option value="overdue">Overdue</option>
 											<option value="stale">Stale</option>
+											<option value="awaiting">Awaiting report</option>
 										</select>
 									</div>
 									<div>
